@@ -1,0 +1,171 @@
+<div id="loginForm" v-if="loginPrompt === true" style="margin: 20px">
+    <h1>Please Login</h1>
+    <h2>Using your Fluro account</h2>
+    <fluro-basic-form v-model="credentials" @success="loginSuccess" @error="loginError" method="post" submitText="Login" url="/token/login" :fields="fields" />
+    <button v-on:click="loginPrompt = false">Close</button>
+</div>
+
+<div v-else>
+    <transition name="fade">
+        <div id="message" v-if="showMessage" :class="messageContent.type">
+            <h1>
+                <fluro-icon :icon="messageContent.icon" /> {{messageContent.title}}
+            </h1>
+            <p>{{messageContent.description}}</p>
+        </div>
+    </transition>
+    <div id="loader" v-if="loading">
+        <fluro-icon icon="spinner" spin />
+    </div>
+    <div v-show="!loading">
+        <!-- Plan selection -->
+        <div id="planSelection" v-if="plan === false">
+            <h3>Upcoming Plans</h3>
+            <p>Please select a plan to view</p>
+            <fluro-content-list :type=" listType" :fields="listFields" :criteria="criteria" :perPage="8">
+                <template v-slot="{nextPage, previousPage, currentPage, page, totalPages, items, previousPageEnabled, nextPageEnabled}">
+                    <div v-for="(event, index) in page" :key="done(event, index, page)._id">
+                        <div class="event">
+                            <fluro-link v-for="plan in event.plans" size="sm" :to="redirectPlan(plan._id)">
+                                <h4>{{ event.title }}</h4>
+                                <div>{{ event.startDate | formatDate('dddd Do MMMM YYYY HH:mma') }}</div>
+                            </fluro-link>
+                        </div>
+                    </div>
+
+                    <a :disabled="!previousPageEnabled" @click="previousPage()">Previous</a>
+                    <a :disabled="!nextPageEnabled" @click="nextPage()">Next</a>
+
+                    <div>{{currentPage}} of {{totalPages}} Pages</div>
+                </template>
+            </fluro-content-list>
+        </div>
+        <!-- Plan viewer -->
+        <div v-else-if="!loading && plan">
+            <div id="headcount" v-if="showHeadcount">
+                <h1>Add Headcount for {{eventTitle}}</h1>
+                <button @click="headcount--">
+                    <fluro-icon icon="minus" />
+                </button>
+                <input type="number" v-model="headcount"></input>
+                <button @click="headcount++">
+                    <fluro-icon icon="plus" />
+                </button>
+                </br>
+                <button @click="saveHeadcount()">Save</button>
+                <button @click="showHeadcount=false">Close</button>
+            </div>
+
+            <div id="clocks">
+                <p id="currentItem"><strong>{{current ? current.title : "Not Started"}}</strong></p>
+                <p id="nextItem"><strong>{{next ? "Next: " + next.title : "Please start the plan to continue"}} <template v-if="current && next">- Expected Start: {{timeFormatted(itemStartedAt + (current.duration * 1000), false)}}</template></strong></p>
+                <p id="timer" v-if="current" v-html="itemTimeRemaining">
+                </p>
+                <p id="clock">{{timeFormatted(currentTime, false)}}</p>
+            </div>
+            <div id="mobileControl">
+                <div v-if="showMobileControlMenu">
+                    <button v-if="!hasControl && isLoggedIn" v-on:click="takeControl()">Take Control</button>
+                    <button v-if="hasControl" v-on:click="showHeadcount=true">Add Headcount</button>
+                    <button v-on:click="window.location.href = '/'">Choose Plan</button>
+                    <button v-on:click="showPreviousItems()">{{hidePreviousItems ? "Show Previous Items" : "Hide Previous Items"}}</button>
+                    <button v-if="hasControl" v-on:click="restartPlan()">Restart Plan</button>
+                    <button v-if="isLoggedIn" v-on:click="logout()">Logout</button>
+                </div>
+                <button v-if="!isLoggedIn" v-on:click="login()">Login</button>
+                <div v-else>
+                    <button v-on:click="showMobileControlMenu = !showMobileControlMenu" style="width: 10px; float: left; margin-left: 10px">
+                        <fluro-icon :icon="showMobileControlMenu ? 'arrow-up' : 'arrow-down'" />
+                    </button>
+                    <button v-if="hasControl" v-on:click="nextItem()" style="width: 10px; float: right">
+                        <fluro-icon icon="forward" />
+                    </button>
+                    <button v-if="hasControl" v-on:click="previousItem()" style="width: 10px; float: right">
+                        <fluro-icon icon="backward" />
+                    </button>
+                </div>
+
+
+            </div>
+            <div id="item" v-if="collapsePlan">
+                <div v-if="!current && !next">
+                    <button v-on:click="startPlan()">Start Plan</button>
+                </div>
+                <div v-else>
+                    <button v-if="!hasControl && isLoggedIn" v-on:click="takeControl()">Take Control</button>
+                    <button v-if="hasControl" v-on:click="showHeadcount=true">Add Headcount</button>
+                    <button v-if="hasControl" v-on:click="previousItem()">Previous Item</button>
+                    <button v-if="hasControl" v-on:click="nextItem()">Next Item</button>
+                    <button v-if="hasControl" v-on:click="restartPlan()">Restart Plan</button>
+                    <button v-if="!isLoggedIn" v-on:click="login()">Login</button>
+                    <button v-if="isLoggedIn" v-on:click="logout()">Logout</button>
+                    <p style="float: right; margin-top: 1rem; margin-right: 10px" v-if="!hasControl">{{nameInControl ? nameInControl : "No one " }} has control of the plan</p>
+                    <div id="currentItem" v-if="current">
+                        <h1>Now: {{current.title}}</h1>
+                        <p><strong>Scheduled:</strong> {{timeFormatted(startDate + (current.timeOffset * 1000))}}</p>
+                        <p><strong>Started:</strong> {{timeFormatted(itemStartedAt, false)}}</p>
+                        <p><strong>Duration:</strong> {{secondsToMinSec(current.duration, true)}}</p>
+                        <div id="noteCategories" v-for="(category, index) in noteCategories">
+                            <p><strong>{{category}}</strong></p>
+                            <div v-if="current.notes && current.notes[category]" v-html="current.notes[category]"></div>
+                            <div v-else>-</div>
+                        </div>
+                    </div>
+                    <div id="nextItem" v-if="next">
+                        <h1>Next: {{next.title}}</h1>
+                        <p><strong>Scheduled:</strong> {{timeFormatted(startDate + (next.timeOffset * 1000))}}</p>
+                        <p><strong>Expected Start:</strong> {{timeFormatted(itemStartedAt + (current.duration * 1000), false)}}</p>
+                        <p><strong>Duration:</strong> {{secondsToMinSec(next.duration, true)}}</p>
+                        <div id="noteCategories" v-for="(category, index) in noteCategories">
+                            <p><strong>{{category}}</strong></p>
+                            <div v-if="next.notes && next.notes[category]" v-html="next.notes[category]"></div>
+                            <div v-else>-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div id="plan" :style="!collapsePlan ? 'width: 100%' : ''">
+                <button class="hideWhenMobile" v-on:click="window.location.href = '/'">Choose Plan</button>
+                <button id="collapsePlan" v-on:click="showCollapsePlan()">{{collapsePlan ? "Expand" : "Collapse"}}</button>
+                <button class="hideWhenMobile" v-on:click="showPreviousItems()">{{hidePreviousItems ? "Show Previous Items" : "Hide Previous Items"}}</button>
+                <table class="plan">
+                    <thead>
+                        <tr class="header">
+                            <th>Time</th>
+                            <th>Item</th>
+                            <th>Details</th>
+                            <th v-show="!collapsePlan" v-for="(category, index) in noteCategories">{{category}}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr :class="item.type == 'start' ? 'start' : (item.type == 'breaker' ? 'header' : (index == currentItem ? 'active' : ''))" v-show="!currentItem || !hidePreviousItems || (hidePreviousItems && index >= currentItem - 1)" v-for="(item, index) in plan.schedules" :key="item._id">
+                            <td class="medium">
+                                <template v-if="item.type != 'breaker' && item.type != 'start'">
+                                    <p>{{timeFormatted(startDate + (item.timeOffset * 1000))}}</p>
+                                    <p><small>{{secondsToMinSec(item.duration, true)}}</small></p>
+                                </template>
+                            </td>
+                            <td>
+                                <p><strong>{{item.title}}</strong></p>
+
+                                <p v-if="item.type == 'song' && item.extra && item.extra.data"><small>BPM: {{item.extra.data.bpm}}</small></p>
+                                <p v-if="item.type == 'song' && item.extra && item.extra.data"><small>Key: {{item.extra.data.key}}</small></p>
+                                <p v-if="item.type == 'song' && item.extra && item.extra.data"><small>Artist: {{item.extra.data.artist}}</small></p>
+                                <div style="margin-top: 10px">
+                                    <p v-if="item.type == 'song' && item.extra && item.extra.data" @click="handleItemClick(index)"><small class="songlink">View Song</small></p>
+                                    <p v-if="item.type == 'song' && item.extra && item.extra.data" @click="handleItemClick(index, 'youtube')"><small class="songlink">Youtube</small></p>
+                                </div>
+                            </td>
+                            <td v-html="item.detail"></td>
+                            <td v-show="!collapsePlan" v-for="(category, j) in noteCategories">
+                                <div v-if="item.notes && item.notes[category]" v-html="item.notes[category]"></div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
