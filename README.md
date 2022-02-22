@@ -45,5 +45,13 @@ This site block requires permissions to work. The permissions are as follows:
 
 You may also want to restrict the site to login.
 
+# Future Development
+  The following features are aimed to be added in the future:
+  * Better integration with the [Church Clocks](https://github.com/Kardinia-Church/Church-Clocks) project
+  * Abbility to change the current countdown
+  * Chat
+  * Ping message (A popup alerting users to something) (Like a call)
+  * Notes live notes on an item
+  
 # Liability
 I do not take any responsibility for this project so use it at your own risk. There may be possibility of problems so do your own testing.
